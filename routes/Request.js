@@ -31,4 +31,8 @@ router.route('/:providerId')
 router.route('/update/:requestId')
   .put(requestController.updateServiceRequest);
 
+// Send manual reminder for a request
+router.route('/reminder/:requestId')
+  .post(requestController.sendManualReminder);
+
 module.exports = router;

@@ -1,12 +1,31 @@
 const ServiceRequest = require('../model/ServiceRequest');
 const Service = require('../model/ServiceSchema');
 const User = require('../model/UserSchema');
+const { sendServiceConfirmation } = require('../services/emailService');
+const { sendReminderForService } = require('../services/reminderScheduler');
 
 // Create a new service request
 const createServiceRequest = async (req, res) => {
   try {
-    const { customerName, serviceType, notes } = req.body;
+    const { customerName, customerEmail, serviceType, scheduledTime, notes } = req.body;
     const { providerId } = req.params;
+
+    // Validate required fields
+    if (!customerEmail || !scheduledTime) {
+      return res.status(400).json({
+        success: false,
+        message: 'Customer email and scheduled time are required'
+      });
+    }
+
+    // Validate scheduled time is in the future
+    const scheduledDate = new Date(scheduledTime);
+    if (scheduledDate <= new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Scheduled time must be in the future'
+      });
+    }
 
     // Check if provider exists and is available
     const provider = await Service.findOne({ id: parseInt(providerId) });
@@ -29,14 +48,31 @@ const createServiceRequest = async (req, res) => {
     // Create new service request
     const newRequest = new ServiceRequest({
       customerName,
+      customerEmail,
       providerId: parseInt(providerId),
       serviceType,
+      scheduledTime: scheduledDate,
       notes,
       status: 'pending',
       startTime: new Date()
     });
 
     const savedRequest = await newRequest.save();
+
+    // Send confirmation email
+    try {
+      await sendServiceConfirmation(
+        customerEmail,
+        customerName,
+        serviceType,
+        scheduledDate,
+        parseInt(providerId)
+      );
+      console.log(`Confirmation email sent to ${customerEmail}`);
+    } catch (emailError) {
+      console.error('Failed to send confirmation email:', emailError);
+      // Don't fail the request if email fails
+    }
 
     res.status(201).json({
       success: true,
@@ -230,6 +266,34 @@ const getServiceRequestsByCustomer = async (req, res) => {
   }
 };
 
+// Send manual reminder for a service
+const sendManualReminder = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    
+    const result = await sendReminderForService(requestId);
+    
+    if (result.success) {
+      res.status(200).json({
+        success: true,
+        message: 'Reminder sent successfully',
+        data: { messageId: result.messageId }
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: result.error
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error sending reminder',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   createServiceRequest,
   updateServiceRequest,
@@ -237,5 +301,6 @@ module.exports = {
   getActiveServiceRequests,
   getCompletedServiceRequests,
   getServiceRequestsByProvider,
-  getServiceRequestsByCustomer
+  getServiceRequestsByCustomer,
+  sendManualReminder
 };
